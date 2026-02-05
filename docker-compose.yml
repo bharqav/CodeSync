@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # Frontend Service
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: codesync-frontend
+    ports:
+      - "80:8080"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - codesync-network
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Backend Service
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: codesync-backend
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./server/.env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - PORT=3001
+    restart: unless-stopped
+    networks:
+      - codesync-network
+    healthcheck:
+      test: [ "CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - redis
+
+  # Redis for session management and caching
+  redis:
+    image: redis:7-alpine
+    container_name: codesync-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - codesync-network
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeThisPassword}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  codesync-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

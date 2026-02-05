@@ -1,0 +1,59 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String?   @unique
+  password  String?
+  email     String?   @unique
+  googleId  String?   @unique
+  name      String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+
+  ownedRooms       Room[]            @relation("RoomOwner")
+  roomParticipants RoomParticipant[]
+
+  @@index([username])
+  @@index([email])
+  @@index([googleId])
+}
+
+model Room {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String?
+  ownerId    String
+  owner      User     @relation("RoomOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  lastActive DateTime @default(now())
+  expiresAt  DateTime
+  isActive   Boolean  @default(true)
+
+  participants RoomParticipant[]
+
+  @@index([code])
+  @@index([ownerId])
+}
+
+model RoomParticipant {
+  id       String   @id @default(cuid())
+  roomId   String
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime @default(now())
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+}

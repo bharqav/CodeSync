@@ -1,0 +1,193 @@
+/* OpenNote-Inspired Design System */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+    /* Color Palette - CodeSync Brand (Creamy + Black) */
+
+    /* Backgrounds - Creamier tones */
+    --color-bg-primary: #F8F6F3;
+    --color-bg-surface: #FFFFFF;
+    --color-bg-sidebar: #F2EFE9;
+    --color-bg-secondary: #FBF9F6;
+
+    /* Text Colors */
+    --color-text-primary: #1A1A1A;
+    --color-text-secondary: #5A5A5A;
+    --color-text-tertiary: #8A8A8A;
+    --color-text-muted: #B0B0B0;
+
+    /* Black Accents - Primary Brand Color */
+    --color-black-primary: #1A1A1A;
+    --color-black-hover: #2D2D2D;
+    --color-black-light: #F5F5F5;
+    --color-black-dark: #000000;
+
+    /* Warm accents for highlights */
+    --color-accent-warm: #D4C5B0;
+    --color-accent-light: #E8E0D5;
+
+    /* Borders - Softer, creamier */
+    --color-border: #E8E4DD;
+    --color-border-light: #F0EDE6;
+    --color-border-dark: #D4CFC5;
+
+    /* Status Colors */
+    --color-success: #52B869;
+    --color-error: #EF4444;
+    --color-warning: #F59E0B;
+    --color-info: #3B82F6;
+
+    /* Shadows - Subtle and Professional */
+    --shadow-sm: 0px 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0px 2px 4px rgba(0, 0, 0, 0.06), 0px 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-lg: 0px 4px 8px rgba(0, 0, 0, 0.08), 0px 2px 4px rgba(0, 0, 0, 0.06);
+    --shadow-xl: 0px 8px 16px rgba(0, 0, 0, 0.10), 0px 4px 8px rgba(0, 0, 0, 0.08);
+
+    /* Border Radius */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-full: 9999px;
+
+    /* Spacing Scale (4px base) */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
+
+    /* Typography */
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    /* Font Sizes */
+    --text-xs: 12px;
+    --text-sm: 14px;
+    --text-base: 16px;
+    --text-lg: 18px;
+    --text-xl: 20px;
+    --text-2xl: 24px;
+    --text-3xl: 30px;
+    --text-4xl: 36px;
+
+    /* Font Weights */
+    --font-light: 300;
+    --font-normal: 400;
+    --font-medium: 500;
+    --font-semibold: 600;
+    --font-bold: 700;
+
+    /* Line Heights */
+    --leading-tight: 1.25;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.75;
+
+    /* Transitions */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Global Styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-family);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    color: var(--color-text-primary);
+    background-color: var(--color-bg-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Utility Classes */
+.surface {
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+}
+
+.btn-primary {
+    background-color: var(--color-black-primary);
+    color: white;
+    font-weight: var(--font-semibold);
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-base);
+}
+
+.btn-primary:hover {
+    background-color: var(--color-black-hover);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-primary:active {
+    transform: translateY(0);
+}
+
+.input-field {
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-family: var(--font-family);
+    font-size: var(--text-base);
+    color: var(--color-text-primary);
+    background-color: var(--color-bg-surface);
+    transition: all var(--transition-base);
+}
+
+.input-field:focus {
+    outline: none;
+    border-color: var(--color-black-primary);
+    box-shadow: 0 0 0 3px var(--color-black-light);
+}
+
+.input-field::placeholder {
+    color: var(--color-text-tertiary);
+}
+
+/* Smooth Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-in {
+    animation: fadeIn var(--transition-slow);
+}
+
+.animate-slide-up {
+    animation: slideUp var(--transition-slow);
+}
