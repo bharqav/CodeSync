@@ -18,6 +18,7 @@ dotenv.config();
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
 
 const app = express();
+app.set('trust proxy', 1); // Trust Render's load balancer
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
