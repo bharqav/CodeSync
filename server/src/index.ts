@@ -345,11 +345,24 @@ io.on('connection', (socket: any) => {
 // Error handling
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error(err);
-    res.status(500).json({ error: 'Internal Server Error' });
+    // Return actual error message for debugging purposes
+    res.status(500).json({ error: err.message || 'Internal Server Error', details: err.stack });
 });
 
 // Start
-httpServer.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+const startServer = async () => {
+    try {
+        await prisma.$connect();
+        console.log('✅ Database connected successfully');
+
+        httpServer.listen(PORT, () => {
+            console.log(`🚀 Server running on http://localhost:${PORT}`);
+            console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
+        });
+    } catch (error) {
+        console.error('❌ Failed to connect to database:', error);
+        process.exit(1);
+    }
+};
+
+startServer();
