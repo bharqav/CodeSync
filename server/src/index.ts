@@ -254,9 +254,9 @@ roomRouter.post('/create', async (req: Request, res: Response) => {
 roomRouter.post('/join/:code', async (req: Request, res: Response) => {
     try {
         const { code } = req.params;
-        const user = req.user as any;
+        const roomCode = String(code);
 
-        const room = await prisma.room.findUnique({ where: { code } });
+        const room = await prisma.room.findUnique({ where: { code: roomCode } });
         if (!room) return res.status(404).json({ error: 'Room not found' });
 
         await prisma.roomParticipant.upsert({
