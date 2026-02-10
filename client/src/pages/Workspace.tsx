@@ -27,6 +27,9 @@ export default function Workspace() {
     const [leftWidth, setLeftWidth] = useState(50); // percentage
     const [whiteboardHeight, setWhiteboardHeight] = useState(55); // percentage
 
+    const [users, setUsers] = useState<{ id: string, username: string }[]>([]);
+    const [showUserList, setShowUserList] = useState(false);
+
     useEffect(() => {
         if (!token || !roomCode) return;
 
@@ -41,6 +44,10 @@ export default function Workspace() {
 
         newSocket.on('code-update', (newCode: string) => {
             setCode(newCode);
+        });
+
+        newSocket.on('room-users', (usersList: { id: string, username: string }[]) => {
+            setUsers(usersList);
         });
 
         return () => {
@@ -86,17 +93,42 @@ export default function Workspace() {
                     {/* Right: Actions */}
                     <div className="flex items-center gap-4">
                         {/* Users Pill */}
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-border rounded-full shadow-sm hover:shadow-md transition-shadow cursor-default">
-                            <div className="flex items-center gap-1.5">
-                                <Users className="w-4 h-4 text-text-secondary" />
-                                <span className="text-sm font-semibold text-text-primary">Users</span>
-                            </div>
-                            <div className="w-px h-4 bg-border"></div>
-                            <div className="flex -space-x-1.5">
-                                <div className="w-6 h-6 rounded-full bg-black-primary text-white flex items-center justify-center text-[10px] font-bold ring-2 ring-white">
-                                    {currentUser.charAt(0).toUpperCase()}
+                        <div className="relative group">
+                            <button
+                                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-border rounded-full shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                                onClick={() => setShowUserList(!showUserList)}
+                            >
+                                <div className="flex items-center gap-1.5">
+                                    <Users className="w-4 h-4 text-text-secondary" />
+                                    <span className="text-sm font-semibold text-text-primary">Users</span>
                                 </div>
-                            </div>
+                                <div className="w-px h-4 bg-border"></div>
+                                <div className="flex -space-x-1.5">
+                                    <div className="w-6 h-6 rounded-full bg-black-primary text-white flex items-center justify-center text-[10px] font-bold ring-2 ring-white">
+                                        {users.length}
+                                    </div>
+                                </div>
+                            </button>
+
+                            {/* User List Dropdown */}
+                            {showUserList && (
+                                <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-border rounded-xl shadow-lg overflow-hidden z-50">
+                                    <div className="p-3 border-b border-border bg-cream-50">
+                                        <h3 className="text-xs font-bold text-text-tertiary uppercase tracking-wider">Online Users</h3>
+                                    </div>
+                                    <div className="max-h-48 overflow-y-auto">
+                                        {users.map((u) => (
+                                            <div key={u.id} className="px-3 py-2 flex items-center gap-2 hover:bg-cream-50 transition-colors">
+                                                <div className="w-6 h-6 rounded-full bg-black-primary text-white flex items-center justify-center text-[10px] font-bold">
+                                                    {u.username.charAt(0).toUpperCase()}
+                                                </div>
+                                                <span className="text-sm text-text-primary truncate">{u.username}</span>
+                                                {u.username === currentUser && <span className="text-[10px] text-text-tertiary">(You)</span>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* End Button */}

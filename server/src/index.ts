@@ -11,6 +11,7 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as LocalStrategy } from 'passport-local';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -147,6 +148,14 @@ passport.deserializeUser(async (id: string, done) => {
     }
 });
 
+const signToken = (user: any) => {
+    return jwt.sign(
+        { id: user.id, username: user.username },
+        process.env.JWT_SECRET || 'secret',
+        { expiresIn: '1d' }
+    );
+};
+
 // --- Routes ---
 
 // Health check
@@ -188,7 +197,8 @@ authRouter.post('/signup', async (req: Request, res: Response) => {
         // Auto-login after signup
         req.login(user, (err) => {
             if (err) return res.status(500).json({ error: 'Login failed after signup' });
-            return res.json({ user });
+            const token = signToken(user);
+            return res.json({ user, token });
         });
     } catch (error) {
         res.status(500).json({ error: 'Signup failed' });
@@ -202,7 +212,8 @@ authRouter.post('/login', (req, res, next) => {
         if (!user) return res.status(401).json({ error: 'Invalid credentials' });
         req.login(user, (err) => {
             if (err) return next(err);
-            return res.json({ user });
+            const token = signToken(user);
+            return res.json({ user, token });
         });
     })(req, res, next);
 });
@@ -228,8 +239,23 @@ app.use('/api/auth', authRouter);
 const roomRouter = express.Router();
 
 // Middleware to ensure auth
-const ensureAuth = (req: Request, res: Response, next: NextFunction) => {
+const ensureAuth = async (req: Request, res: Response, next: NextFunction) => {
     if (req.isAuthenticated()) return next();
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+            const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+            if (user) {
+                req.user = user;
+                return next();
+            }
+        } catch (err) {
+            console.error('JWT Verification failed:', err);
+        }
+    }
     res.status(401).json({ error: 'Unauthorized' });
 };
 
@@ -298,6 +324,30 @@ roomRouter.get('/my-rooms', async (req: Request, res: Response) => {
     }
 });
 
+roomRouter.delete('/:id', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const user = req.user as any;
+
+        const room = await prisma.room.findUnique({ where: { id } });
+
+        if (!room) {
+            return res.status(404).json({ error: 'Room not found' });
+        }
+
+        if (room.ownerId !== user.id) {
+            return res.status(403).json({ error: 'Not authorized to delete this room' });
+        }
+
+        await prisma.room.delete({ where: { id } });
+
+        res.json({ message: 'Room deleted successfully' });
+    } catch (err) {
+        console.error('Delete room error:', err);
+        res.status(500).json({ error: 'Failed to delete room' });
+    }
+});
+
 app.use('/api/rooms', roomRouter);
 
 // --- WebSockets ---
@@ -312,41 +362,156 @@ io.use(wrapMiddlewareForSocket(passport.initialize()));
 io.use(wrapMiddlewareForSocket(passport.session()));
 
 io.use((socket: any, next) => {
+    // 1. Try Session Auth (from passport.session middleware)
     if (socket.request.user) {
         socket.userId = socket.request.user.id;
         socket.username = socket.request.user.username || socket.request.user.name;
-        next();
-    } else {
-        next(new Error('Unauthorized'));
+        return next();
     }
+
+    // 2. Try JWT Auth (from handshake)
+    const token = socket.handshake.auth?.token;
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+            socket.userId = decoded.id;
+            socket.username = decoded.username;
+            return next();
+        } catch (err) {
+            console.error('Socket JWT Error:', err);
+            return next(new Error('Authentication error'));
+        }
+    }
+
+    next(new Error('Unauthorized'));
 });
 
 io.on('connection', (socket: any) => {
     console.log(`User connected: ${socket.userId}`);
 
-    socket.on('join-room', (roomCode: string) => {
+    socket.on('join-room', async (roomCode: string) => {
         socket.join(roomCode);
         console.log(`User ${socket.userId} joined room ${roomCode}`);
+
+        try {
+            // Load saved content
+            const room = await prisma.room.findUnique({
+                where: { code: roomCode },
+                include: { messages: { include: { user: true }, orderBy: { createdAt: 'asc' } } }
+            });
+
+            if (room) {
+                // Send saved code
+                if (room.content) {
+                    socket.emit('code-update', room.content);
+                }
+
+                // Send saved messages
+                const history = room.messages.map((msg: any) => ({
+                    id: msg.id,
+                    user: msg.user.username || msg.user.name,
+                    text: msg.text,
+                    timestamp: msg.createdAt
+                }));
+                socket.emit('load-messages', history);
+            }
+
+            // Update user list
+            const sockets = await io.in(roomCode).fetchSockets();
+            const users = sockets.map((s: any) => ({
+                id: s.userId,
+                username: s.username
+            }));
+            io.to(roomCode).emit('room-users', users);
+        } catch (err) {
+            console.error('Error joining room:', err);
+        }
     });
 
-    socket.on('code-change', (data: { roomCode: string; code: string }) => {
+    socket.on('code-change', async (data: { roomCode: string; code: string }) => {
         socket.to(data.roomCode).emit('code-update', data.code);
+
+        // Debounce or save periodically could be better, but for now we save on change
+        // to ensure persistence. In production, use Redis or debounce.
+        try {
+            await prisma.room.update({
+                where: { code: data.roomCode },
+                data: { content: data.code }
+            });
+        } catch (err) {
+            console.error('Failed to save code:', err);
+        }
     });
 
-    socket.on('chat-message', (data: { roomCode: string; message: string; user: any }) => {
+    socket.on('chat-message', async (data: { roomCode: string; message: string; user: any }) => {
         io.to(data.roomCode).emit('new-message', data);
+
+        try {
+            await prisma.message.create({
+                data: {
+                    text: data.message,
+                    userId: socket.userId,
+                    roomId: (await prisma.room.findUnique({ where: { code: data.roomCode }, select: { id: true } }))?.id!
+                }
+            });
+        } catch (err) {
+            console.error('Failed to save message:', err);
+        }
+    });
+
+    socket.on('whiteboard-draw', (data: any) => {
+        socket.to(data.roomCode).emit('whiteboard-draw', data);
+    });
+
+    socket.on('whiteboard-clear', (data: any) => {
+        socket.to(data.roomCode).emit('whiteboard-clear', data);
     });
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.userId);
+        // We can't easily know which room they were in without tracking it on the socket object
+        // For accurate 'room-users' updates on disconnect, we would need to map socket.id to rooms.
+        // A simpler approach for now is to let the client handle reconnection or poll.
+        // However, to fix the user list not updating on disconnect:
+        // iterate all rooms this socket was in (Socket.IO tracks this automatically *before* full disconnect, 
+        // but 'disconnecting' event is better for that).
+        // For 'disconnect', they are already gone from rooms.
+        // Let's use 'disconnecting' to notify rooms.
+    });
+
+    socket.on('disconnecting', () => {
+        const rooms = socket.rooms;
+        rooms.forEach((roomCode: string) => {
+            // socket.rooms contains the socket ID itself too, skip it
+            if (roomCode !== socket.id) {
+                // Get remaining users (excluding this one roughly, but fetchSockets might still include it depending on timing)
+                // Actually fetchSockets in disconnecting *might* still see it.
+                // Better to filter manually or wait a tick. 
+                // Simple hack: Emit event, client filter? No.
+                // Let's just emit 'user-left' or re-emit list excluding self.
+
+                // Since fetchSockets is async, by the time it runs, this socket might be gone or not.
+                // Let's explicitly filter out current user from the list we broadcast.
+                const usersInRoom = Array.from(io.sockets.adapter.rooms.get(roomCode) || []);
+                const remainingUsers = usersInRoom
+                    .filter((sid) => sid !== socket.id)
+                    .map((sid) => {
+                        const s = io.sockets.sockets.get(sid) as any;
+                        return { id: s?.userId, username: s?.username };
+                    })
+                    .filter(u => u.id); // Valid users only
+
+                io.to(roomCode).emit('room-users', remainingUsers);
+            }
+        });
     });
 });
 
 // Error handling
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error(err);
-    // Return actual error message for debugging purposes
-    res.status(500).json({ error: err.message || 'Internal Server Error', details: err.stack });
+    // Return generic error message for security
+    res.status(500).json({ error: 'Internal Server Error' });
 });
 
 // Start

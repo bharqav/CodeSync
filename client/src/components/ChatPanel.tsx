@@ -32,8 +32,19 @@ export function ChatPanel({ roomCode, socket, currentUser }: ChatPanelProps) {
             setMessages((prev) => [...prev, newMessage]);
         });
 
+        socket.on('load-messages', (history: any[]) => {
+            const formattedHistory = history.map(msg => ({
+                id: msg.id,
+                user: msg.user,
+                text: msg.text,
+                timestamp: new Date(msg.timestamp)
+            }));
+            setMessages(formattedHistory);
+        });
+
         return () => {
             socket.off('new-message');
+            socket.off('load-messages');
         };
     }, [socket]);
 

@@ -23,6 +23,7 @@ model User {
 
   ownedRooms       Room[]            @relation("RoomOwner")
   roomParticipants RoomParticipant[]
+  messages         Message[]
 
   @@index([username])
   @@index([email])
@@ -40,6 +41,10 @@ model Room {
   expiresAt  DateTime
   isActive   Boolean  @default(true)
 
+  content    String? // For code persistence
+  language   String   @default("javascript")
+  messages   Message[]
+
   participants RoomParticipant[]
 
   @@index([code])
@@ -55,6 +60,19 @@ model RoomParticipant {
   joinedAt DateTime @default(now())
 
   @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  text      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
   @@index([roomId])
   @@index([userId])
 }
