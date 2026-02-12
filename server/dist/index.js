@@ -16,12 +16,15 @@ const passport_google_oauth20_1 = require("passport-google-oauth20");
 const passport_local_1 = require("passport-local");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const client_1 = require("@prisma/client");
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 dotenv_1.default.config();
+const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
 const app = (0, express_1.default)();
+app.set('trust proxy', 1); // Trust Render's load balancer
 const httpServer = (0, http_1.createServer)(app);
 const io = new socket_io_1.Server(httpServer, {
     cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+        origin: FRONTEND_URL,
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     },
@@ -34,7 +37,7 @@ app.use((0, helmet_1.default)({
     contentSecurityPolicy: false, // Allow WebSocket connections
 }));
 app.use((0, cors_1.default)({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: FRONTEND_URL,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
@@ -133,6 +136,9 @@ passport_1.default.deserializeUser(async (id, done) => {
         done(error, null);
     }
 });
+const signToken = (user) => {
+    return jsonwebtoken_1.default.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET || 'secret', { expiresIn: '1d' });
+};
 // --- Routes ---
 // Health check
 app.get('/health', (req, res) => {
@@ -164,7 +170,8 @@ authRouter.post('/signup', async (req, res) => {
         req.login(user, (err) => {
             if (err)
                 return res.status(500).json({ error: 'Login failed after signup' });
-            return res.json({ user });
+            const token = signToken(user);
+            return res.json({ user, token });
         });
     }
     catch (error) {
@@ -181,7 +188,8 @@ authRouter.post('/login', (req, res, next) => {
         req.login(user, (err) => {
             if (err)
                 return next(err);
-            return res.json({ user });
+            const token = signToken(user);
+            return res.json({ user, token });
         });
     })(req, res, next);
 });
@@ -204,9 +212,24 @@ app.use('/api/auth', authRouter);
 // Room Routes
 const roomRouter = express_1.default.Router();
 // Middleware to ensure auth
-const ensureAuth = (req, res, next) => {
+const ensureAuth = async (req, res, next) => {
     if (req.isAuthenticated())
         return next();
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+            const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'secret');
+            const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+            if (user) {
+                req.user = user;
+                return next();
+            }
+        }
+        catch (err) {
+            console.error('JWT Verification failed:', err);
+        }
+    }
     res.status(401).json({ error: 'Unauthorized' });
 };
 roomRouter.use(ensureAuth);
@@ -270,6 +293,25 @@ roomRouter.get('/my-rooms', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch rooms' });
     }
 });
+roomRouter.delete('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = req.user;
+        const room = await prisma.room.findUnique({ where: { id } });
+        if (!room) {
+            return res.status(404).json({ error: 'Room not found' });
+        }
+        if (room.ownerId !== user.id) {
+            return res.status(403).json({ error: 'Not authorized to delete this room' });
+        }
+        await prisma.room.delete({ where: { id } });
+        res.json({ message: 'Room deleted successfully' });
+    }
+    catch (err) {
+        console.error('Delete room error:', err);
+        res.status(500).json({ error: 'Failed to delete room' });
+    }
+});
 app.use('/api/rooms', roomRouter);
 // --- WebSockets ---
 const wrapMiddlewareForSocket = (middleware) => (socket, next) => middleware(socket.request, {}, next);
@@ -281,39 +323,156 @@ io.use(wrapMiddlewareForSocket((0, express_session_1.default)({
 io.use(wrapMiddlewareForSocket(passport_1.default.initialize()));
 io.use(wrapMiddlewareForSocket(passport_1.default.session()));
 io.use((socket, next) => {
+    // 1. Try Session Auth (from passport.session middleware)
     if (socket.request.user) {
         socket.userId = socket.request.user.id;
         socket.username = socket.request.user.username || socket.request.user.name;
-        next();
+        return next();
     }
-    else {
-        next(new Error('Unauthorized'));
+    // 2. Try JWT Auth (from handshake)
+    const token = socket.handshake.auth?.token;
+    if (token) {
+        try {
+            const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'secret');
+            socket.userId = decoded.id;
+            socket.username = decoded.username;
+            return next();
+        }
+        catch (err) {
+            console.error('Socket JWT Error:', err);
+            return next(new Error('Authentication error'));
+        }
     }
+    next(new Error('Unauthorized'));
 });
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.userId}`);
-    socket.on('join-room', (roomCode) => {
+    socket.on('join-room', async (roomCode) => {
         socket.join(roomCode);
         console.log(`User ${socket.userId} joined room ${roomCode}`);
+        try {
+            // Load saved content
+            const room = await prisma.room.findUnique({
+                where: { code: roomCode },
+                include: { messages: { include: { user: true }, orderBy: { createdAt: 'asc' } } }
+            });
+            if (room) {
+                // Send saved code
+                if (room.content) {
+                    socket.emit('code-update', room.content);
+                }
+                // Send saved messages
+                const history = room.messages.map((msg) => ({
+                    id: msg.id,
+                    user: msg.user.username || msg.user.name,
+                    text: msg.text,
+                    timestamp: msg.createdAt
+                }));
+                socket.emit('load-messages', history);
+            }
+            // Update user list
+            const sockets = await io.in(roomCode).fetchSockets();
+            const users = sockets.map((s) => ({
+                id: s.userId,
+                username: s.username
+            }));
+            io.to(roomCode).emit('room-users', users);
+        }
+        catch (err) {
+            console.error('Error joining room:', err);
+        }
     });
-    socket.on('code-change', (data) => {
+    socket.on('code-change', async (data) => {
         socket.to(data.roomCode).emit('code-update', data.code);
+        // Debounce or save periodically could be better, but for now we save on change
+        // to ensure persistence. In production, use Redis or debounce.
+        try {
+            await prisma.room.update({
+                where: { code: data.roomCode },
+                data: { content: data.code }
+            });
+        }
+        catch (err) {
+            console.error('Failed to save code:', err);
+        }
     });
-    socket.on('chat-message', (data) => {
+    socket.on('chat-message', async (data) => {
         io.to(data.roomCode).emit('new-message', data);
+        try {
+            await prisma.message.create({
+                data: {
+                    text: data.message,
+                    userId: socket.userId,
+                    roomId: (await prisma.room.findUnique({ where: { code: data.roomCode }, select: { id: true } }))?.id
+                }
+            });
+        }
+        catch (err) {
+            console.error('Failed to save message:', err);
+        }
+    });
+    socket.on('whiteboard-draw', (data) => {
+        socket.to(data.roomCode).emit('whiteboard-draw', data);
+    });
+    socket.on('whiteboard-clear', (data) => {
+        socket.to(data.roomCode).emit('whiteboard-clear', data);
     });
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.userId);
+        // We can't easily know which room they were in without tracking it on the socket object
+        // For accurate 'room-users' updates on disconnect, we would need to map socket.id to rooms.
+        // A simpler approach for now is to let the client handle reconnection or poll.
+        // However, to fix the user list not updating on disconnect:
+        // iterate all rooms this socket was in (Socket.IO tracks this automatically *before* full disconnect, 
+        // but 'disconnecting' event is better for that).
+        // For 'disconnect', they are already gone from rooms.
+        // Let's use 'disconnecting' to notify rooms.
+    });
+    socket.on('disconnecting', () => {
+        const rooms = socket.rooms;
+        rooms.forEach((roomCode) => {
+            // socket.rooms contains the socket ID itself too, skip it
+            if (roomCode !== socket.id) {
+                // Get remaining users (excluding this one roughly, but fetchSockets might still include it depending on timing)
+                // Actually fetchSockets in disconnecting *might* still see it.
+                // Better to filter manually or wait a tick. 
+                // Simple hack: Emit event, client filter? No.
+                // Let's just emit 'user-left' or re-emit list excluding self.
+                // Since fetchSockets is async, by the time it runs, this socket might be gone or not.
+                // Let's explicitly filter out current user from the list we broadcast.
+                const usersInRoom = Array.from(io.sockets.adapter.rooms.get(roomCode) || []);
+                const remainingUsers = usersInRoom
+                    .filter((sid) => sid !== socket.id)
+                    .map((sid) => {
+                    const s = io.sockets.sockets.get(sid);
+                    return { id: s?.userId, username: s?.username };
+                })
+                    .filter(u => u.id); // Valid users only
+                io.to(roomCode).emit('room-users', remainingUsers);
+            }
+        });
     });
 });
 // Error handling
 app.use((err, req, res, next) => {
     console.error(err);
+    // Return generic error message for security
     res.status(500).json({ error: 'Internal Server Error' });
 });
 // Start
-httpServer.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+const startServer = async () => {
+    try {
+        await prisma.$connect();
+        console.log('✅ Database connected successfully');
+        httpServer.listen(PORT, () => {
+            console.log(`🚀 Server running on http://localhost:${PORT}`);
+            console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
+        });
+    }
+    catch (error) {
+        console.error('❌ Failed to connect to database:', error);
+        process.exit(1);
+    }
+};
+startServer();
 //# sourceMappingURL=index.js.map

@@ -172,9 +172,9 @@ authRouter.get('/google',
 );
 
 authRouter.get('/google/callback',
-    passport.authenticate('google', { failureRedirect: process.env.FRONTEND_URL || 'http://localhost:5173/login?error=auth_failed' }),
+    passport.authenticate('google', { failureRedirect: `${FRONTEND_URL}/login?error=auth_failed` }),
     (req: Request, res: Response) => {
-        res.redirect(process.env.FRONTEND_URL || 'http://localhost:5173/dashboard');
+        res.redirect(`${FRONTEND_URL}/dashboard`);
     }
 );
 
@@ -264,7 +264,7 @@ roomRouter.use(ensureAuth);
 roomRouter.post('/create', async (req: Request, res: Response) => {
     try {
         const { name } = req.body;
-        const user = req.user as any;
+        const user = req.user!;
         const code = Array.from({ length: 6 }, () => '0123456789'[Math.floor(Math.random() * 10)]).join('');
 
         const room = await prisma.room.create({
@@ -285,7 +285,7 @@ roomRouter.post('/join/:code', async (req: Request, res: Response) => {
     try {
         const { code } = req.params;
         const roomCode = String(code);
-        const user = req.user as any;
+        const user = req.user!;
 
         const room = await prisma.room.findUnique({ where: { code: roomCode } });
         if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -304,7 +304,7 @@ roomRouter.post('/join/:code', async (req: Request, res: Response) => {
 
 roomRouter.get('/my-rooms', async (req: Request, res: Response) => {
     try {
-        const user = req.user as any;
+        const user = req.user!;
         const rooms = await prisma.room.findMany({
             where: {
                 OR: [
@@ -327,7 +327,7 @@ roomRouter.get('/my-rooms', async (req: Request, res: Response) => {
 roomRouter.delete('/:id', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const user = req.user as any;
+        const user = req.user!;
 
         const room = await prisma.room.findUnique({ where: { id } });
 

@@ -4,11 +4,14 @@
 
 Before deploying to production, complete these security steps:
 
-### 1. Environment Variables
+### 1. Environment Variables (CRITICAL)
+- [ ] **Frontend (Vercel)**: Set `VITE_API_URL` to your backend URL (e.g., `https://api.myapp.com`)
+    - *Warning: If unset, it defaults to localhost, breaking login in production.*
+- [ ] **Backend (Render)**: Set `FRONTEND_URL` to your frontend URL (e.g., `https://myapp.vercel.app`)
+    - *Warning: If mismatch, CORS errors will block requests.*
 - [ ] Generate secure JWT secret: `openssl rand -base64 64`
 - [ ] Update `JWT_SECRET` in `.env`
 - [ ] Set strong `REDIS_PASSWORD`
-- [ ] Update `FRONTEND_URL` to production domain
 - [ ] Configure Google OAuth credentials
 - [ ] Never commit `.env` files
 

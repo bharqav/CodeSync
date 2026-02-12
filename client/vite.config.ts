@@ -11,8 +11,8 @@ export default defineConfig({
         },
     },
     server: {
-        host: true, // Needed for Docker
-        port: 8080,
+        // host: true, // Needed for Docker
+        // port: 8080,
     },
     build: {
         outDir: 'dist',
